@@ -154,6 +154,7 @@ fn schedule_macos_terminate(app: &mut WordApp, key_file: Option<&control_server:
     print::finish_pending_jobs();
     app.session.finish_recovery();
     save_prefs(app);
+    save_assistant_settings(app);
     if let Some(key_file) = key_file {
         key_file.remove();
     }

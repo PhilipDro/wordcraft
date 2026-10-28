@@ -550,7 +550,7 @@ fn settings(pane: &mut AssistantPane, ui: &mut Ui) -> Option<bool> {
             let preset = PRESETS.iter().find(|p| p.id == id);
             let name = preset.map_or("", |p| p.name);
             ui.label(tl!("Provider"));
-            egui::ComboBox::from_id_salt("assistant_provider").selected_text(tl!(name)).width(ui.available_width()).show_ui(ui, |ui| {
+            craft_ui::ComboBox::from_id_salt("assistant_provider").selected_text(tl!(name)).width(ui.available_width()).show_ui(ui, |ui| {
                 for p in PRESETS {
                     if ui.selectable_label(p.id == id, tl!(p.name)).clicked() && p.id != id {
                         pane.settings.provider = p.id.to_string();
