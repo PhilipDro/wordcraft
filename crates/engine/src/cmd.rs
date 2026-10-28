@@ -1,6 +1,7 @@
 //! Command implementations, one module per area. Each module exposes `specs()`.
 
 pub mod accessibility;
+pub mod ai;
 pub mod canvas;
 pub mod caret;
 pub mod chart;
@@ -60,6 +61,7 @@ use crate::{CmdError, CmdResult, Registry, Session};
 /// The full registry.
 pub fn registry() -> Registry {
     let mut v = Vec::new();
+    v.extend(ai::specs());
     v.extend(text::specs());
     v.extend(caret::specs());
     v.extend(column::specs());

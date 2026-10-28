@@ -5,9 +5,9 @@
 //! model was working, the popover asks before applying. Settings live with the assistant's
 //! (`assistant.json`); their editor is [`settings_ui`].
 
-use egui::{Align, Color32, Layout, Order, Pos2, RichText, Ui, vec2};
+use egui::{Align, Layout, Order, Pos2, RichText, Ui, vec2};
 use serde_json::{Value, json};
-use wordcraft_assistant::rewrite::{self, Job, Outcome, RewritePreset, Scope, Snapshot};
+use wordcraft_assistant::rewrite::{self, Job, Outcome, RewritePreset, Scope};
 
 use crate::WordApp;
 use crate::assistant::AssistantPane;
@@ -151,7 +151,7 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let at = app.assistant.rewrite.anchor.unwrap_or_else(|| ctx.content_rect().center() - vec2(180.0, 80.0));
     let mut action = None;
-    egui::Area::new(egui::Id::new("wc_rewrite_popover")).order(Order::Foreground).fixed_pos(at).constrain(true).show(ctx, |ui| {
+    egui::Area::new(egui::Id::unique("wc_rewrite_popover")).order(Order::Foreground).fixed_pos(at).constrain(true).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).show(ui, |ui| {
             ui.set_width(380.0);
             action = body(app, ui, &t);
@@ -223,7 +223,7 @@ fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
     }
     let settings = &app.assistant.settings.rewrite;
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("wc_rewrite_preset").selected_text("Vorlage").width(150.0).show_ui(ui, |ui| {
+        craft_ui::ComboBox::from_id_salt("wc_rewrite_preset").selected_text("Vorlage").width(150.0).show_ui(ui, |ui| {
             for p in &settings.presets {
                 if ui.selectable_label(false, &p.name).on_hover_text(&p.prompt).clicked() {
                     r.prompt = p.prompt.clone();
@@ -232,7 +232,7 @@ fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
             }
         });
         let scope = r.scope.unwrap_or(settings.scope);
-        egui::ComboBox::from_id_salt("wc_rewrite_scope").selected_text(scope.label()).width(150.0).show_ui(ui, |ui| {
+        craft_ui::ComboBox::from_id_salt("wc_rewrite_scope").selected_text(scope.label()).width(150.0).show_ui(ui, |ui| {
             for s in Scope::ALL {
                 if ui.selectable_label(s == scope, s.label()).clicked() {
                     r.scope = Some(s);
@@ -263,7 +263,7 @@ pub fn settings_ui(pane: &mut AssistantPane, ui: &mut Ui) {
     egui::CollapsingHeader::new(RichText::new("Mit KI bearbeiten").font(semibold(12.5))).id_salt("rewrite_settings").show(ui, |ui| {
         let s = &mut pane.settings.rewrite;
         ui.label("Kontext");
-        egui::ComboBox::from_id_salt("rewrite_scope_setting").selected_text(s.scope.label()).width(ui.available_width()).show_ui(ui, |ui| {
+        craft_ui::ComboBox::from_id_salt("rewrite_scope_setting").selected_text(s.scope.label()).width(ui.available_width()).show_ui(ui, |ui| {
             for x in Scope::ALL {
                 if ui.selectable_label(x == s.scope, x.label()).clicked() && x != s.scope {
                     s.scope = x;
@@ -305,7 +305,6 @@ pub fn settings_ui(pane: &mut AssistantPane, ui: &mut Ui) {
             s.presets.push(RewritePreset { name: "Neu".into(), prompt: String::new() });
             changed = true;
         }
-        let _ = Color32::TRANSPARENT;
     });
     pane.settings_changed |= changed;
 }

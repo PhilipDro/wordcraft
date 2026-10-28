@@ -61,6 +61,7 @@ impl WordApp {
                 }
                 chrome::status_bar(self, ui);
                 crate::assistant::show(self, ui);
+                crate::rewrite_popover::show(self, ui.ctx());
                 panes::show(self, ui);
             }
             if moved(self) {

@@ -58,17 +58,11 @@ impl Scope {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RewritePreset {
     pub name: String,
     pub prompt: String,
-}
-
-impl Default for RewritePreset {
-    fn default() -> Self {
-        RewritePreset { name: String::new(), prompt: String::new() }
-    }
 }
 
 pub const DEFAULT_SYSTEM_PROMPT: &str = "Du bist ein Lektoratswerkzeug in einem Textverarbeitungsprogramm. \

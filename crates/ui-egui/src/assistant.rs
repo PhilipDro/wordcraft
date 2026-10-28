@@ -29,6 +29,9 @@ pub struct AssistantPane {
     pub models: Models,
     /// Start with the Settings section open (tests and screenshots).
     pub settings_open: bool,
+    /// Prompt on selection (ai.rewriteSelection): its state lives here; see
+    /// [crate::rewrite_popover].
+    pub rewrite: crate::rewrite_popover::RewritePopover,
 }
 
 /// A fetched model list and what it was fetched for.
@@ -635,6 +638,7 @@ fn settings(pane: &mut AssistantPane, ui: &mut Ui) -> Option<bool> {
             }
             pane.settings_changed |= changed;
             ui.add_space(2.0);
+            crate::rewrite_popover::settings_ui(pane, ui);
             refresh
         })
         .body_returned

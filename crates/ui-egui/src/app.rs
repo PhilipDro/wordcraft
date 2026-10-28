@@ -366,6 +366,7 @@ impl WordApp {
         zotero::poll(self, ctx);
         read_aloud::poll(self, ctx);
         crate::assistant::poll(self, ctx);
+        crate::rewrite_popover::poll(self, ctx);
         self.clear_stale_change_picture();
         let _ = self.poll_file_dialog();
         self.autosave_tick(now_ms());

@@ -489,6 +489,9 @@ impl WordApp {
                 crate::updates_ui::check(self);
                 Value::Null
             }
+            // Prompt on selection runs in the UI layer: the model endpoint and the network
+            // live here, not in the engine. No prompt param: open the popover; with one, run headless.
+            "ai.rewriteSelection" => return Some(crate::rewrite_popover::command(self, p)),
             "ui.tab" => {
                 let tab = s("tab").unwrap_or("Home").to_string();
                 if tab == "File" {
