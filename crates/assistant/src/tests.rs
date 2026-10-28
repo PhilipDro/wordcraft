@@ -371,6 +371,9 @@ fn connection_needs_no_model() {
     assert!(s.connection().is_ok());
     assert!(s.endpoint().is_err());
     s.current_mut().api_key.clear();
+    // A local server (here localhost) needs no key; a remote custom endpoint still does.
+    assert!(s.connection().is_ok());
+    s.current_mut().base_url = "https://llm.example.com/v1".into();
     assert!(s.connection().is_err());
 }
 

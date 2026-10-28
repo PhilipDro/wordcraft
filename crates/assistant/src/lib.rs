@@ -17,6 +17,7 @@
 
 pub mod guard;
 pub mod providers;
+pub mod rewrite;
 pub mod wire;
 
 use std::sync::mpsc::{Receiver, TryRecvError};

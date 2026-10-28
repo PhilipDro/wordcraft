@@ -81,6 +81,9 @@ pub struct Settings {
     /// The chosen preset id.
     pub provider: String,
     pub providers: BTreeMap<String, ProviderSettings>,
+    /// Prompt on selection (): scope, cap, system prompt, presets. Missing in
+    /// older files: the defaults.
+    pub rewrite: crate::rewrite::RewriteSettings,
 }
 
 /// Everything one request needs.
@@ -125,7 +128,10 @@ impl Settings {
             model: pick(&user.model, p.model),
             api_key: user.api_key.trim().to_string(),
         };
-        if ep.api_key.is_empty() {
+        // A custom endpoint on this machine may be a local server that needs no key (llama.cpp,
+        // Ollama, vLLM, or one forwarded to 127.0.0.1).
+        let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"].iter().any(|h| ep.base_url.starts_with(h));
+        if ep.api_key.is_empty() && !(id == CUSTOM && local) {
             return Err(format!("Add your {} API key in the assistant's settings.", p.name));
         }
         if !(ep.base_url.starts_with("https://") || ep.base_url.starts_with("http://")) {
