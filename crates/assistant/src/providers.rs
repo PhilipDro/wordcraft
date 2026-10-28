@@ -27,6 +27,10 @@ pub struct Preset {
 }
 
 pub const CUSTOM: &str = "custom";
+/// Philip's Hermes gateway (api_server, multiplexed profiles). The model field names the Hermes
+/// profile; the gateway serves each profile at `/p/<profile>/v1` (OpenAI-compatible), so the
+/// Claude-subscription profiles (golem, sonnet, haiku, …) work without an Anthropic API key.
+pub const HERMES: &str = "hermes";
 
 pub const PRESETS: &[Preset] = &[
     Preset { id: "claude", name: "Claude", protocol: Protocol::Anthropic, base_url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5" },
@@ -54,6 +58,7 @@ pub const PRESETS: &[Preset] = &[
     },
     Preset { id: "deepseek", name: "DeepSeek", protocol: Protocol::OpenAi, base_url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
     Preset { id: "grok", name: "Grok", protocol: Protocol::OpenAi, base_url: "https://api.x.ai/v1", model: "grok-4" },
+    Preset { id: HERMES, name: "Hermes", protocol: Protocol::OpenAi, base_url: "http://127.0.0.1:8642", model: "sonnet" },
     Preset { id: CUSTOM, name: "Custom", protocol: Protocol::OpenAi, base_url: "", model: "" },
 ];
 
@@ -122,12 +127,18 @@ impl Settings {
         let p = preset(id).ok_or("unknown provider")?;
         let user = self.providers.get(id).cloned().unwrap_or_default();
         let pick = |user: &str, preset: &str| if user.trim().is_empty() { preset.to_string() } else { user.trim().to_string() };
-        let ep = Endpoint {
+        let mut ep = Endpoint {
             protocol: if id == CUSTOM { user.protocol.unwrap_or(Protocol::OpenAi) } else { p.protocol },
             base_url: pick(&user.base_url, p.base_url).trim_end_matches('/').to_string(),
             model: pick(&user.model, p.model),
             api_key: user.api_key.trim().to_string(),
         };
+        if id == HERMES {
+            ep.base_url = hermes_base(&ep.base_url, &ep.model);
+            if ep.api_key.is_empty() {
+                ep.api_key = hermes_key_from_file();
+            }
+        }
         // A custom endpoint on this machine may be a local server that needs no key (llama.cpp,
         // Ollama, vLLM, or one forwarded to 127.0.0.1).
         let local = ["http://127.0.0.1", "http://localhost", "http://[::1]"].iter().any(|h| ep.base_url.starts_with(h));
@@ -139,4 +150,29 @@ impl Settings {
         }
         Ok(ep)
     }
+}
+
+/// The gateway URL for one Hermes profile: `<gateway>/p/<profile>/v1`, or `<gateway>/v1` for the
+/// default profile (or none). A base URL the user already pointed at a `/v1` is taken as is.
+fn hermes_base(base: &str, profile: &str) -> String {
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/v1") {
+        return base.to_string();
+    }
+    let profile = profile.trim();
+    if profile.is_empty() || profile == "default" || profile == "hermes-agent" {
+        format!("{base}/v1")
+    } else {
+        format!("{base}/p/{profile}/v1")
+    }
+}
+
+/// The gateway key kept outside `assistant.json` (so a settings rewrite never drops it):
+/// `~/.config/wordcraft/hermes-gateway.key`. Empty when missing.
+fn hermes_key_from_file() -> String {
+    std::env::var_os("HOME")
+        .map(|h| std::path::Path::new(&h).join(".config/wordcraft/hermes-gateway.key"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|k| k.trim().to_string())
+        .unwrap_or_default()
 }

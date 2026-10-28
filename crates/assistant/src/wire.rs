@@ -226,7 +226,18 @@ pub fn parse(protocol: Protocol, body: &str) -> Result<Reply, String> {
             }
         }
         Protocol::OpenAi => {
-            let msg = v.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).ok_or("reply has no message")?;
+            let choice = v.get("choices").and_then(|c| c.get(0));
+            // A failed run must never land in the document as text. Hermes' gateway answers a
+            // failed agent run (rate limit, provider down) with 200, finish_reason "error" and the
+            // failure notice as content, plus `hermes.failed`.
+            let failed = choice.and_then(|c| c.get("finish_reason")).and_then(Value::as_str) == Some("error")
+                || v.pointer("/hermes/failed").and_then(Value::as_bool) == Some(true);
+            if failed {
+                let why = v.pointer("/hermes/error").and_then(Value::as_str).filter(|e| !e.trim().is_empty()).map(str::to_string);
+                let text = choice.and_then(|c| c.pointer("/message/content")).and_then(Value::as_str).unwrap_or("");
+                return Err(format!("The model run failed: {}", crate::clip(why.as_deref().unwrap_or(text).trim(), 300)));
+            }
+            let msg = choice.and_then(|c| c.get("message")).ok_or("reply has no message")?;
             push_text(&mut reply.text, &str_of(msg, "content"));
             for c in msg.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
                 let f = c.get("function").unwrap_or(&Value::Null);

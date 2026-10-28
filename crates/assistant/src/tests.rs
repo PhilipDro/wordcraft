@@ -398,3 +398,28 @@ fn parse_models_hostile() {
         let _ = wire::parse_models(Protocol::OpenAi, b);
     }
 }
+
+#[test]
+fn hermes_preset_routes_the_model_to_a_profile() {
+    let mut s = Settings { provider: providers::HERMES.into(), ..Default::default() };
+    s.current_mut().api_key = "gateway-key".into();
+    let ep = s.endpoint().unwrap();
+    assert_eq!((ep.base_url.as_str(), ep.model.as_str()), ("http://127.0.0.1:8642/p/sonnet/v1", "sonnet"));
+    assert_eq!(ep.protocol, Protocol::OpenAi);
+    s.current_mut().model = "golem".into();
+    assert_eq!(s.endpoint().unwrap().base_url, "http://127.0.0.1:8642/p/golem/v1");
+    s.current_mut().model = "default".into();
+    assert_eq!(s.endpoint().unwrap().base_url, "http://127.0.0.1:8642/v1");
+    s.current_mut().model = "haiku".into();
+    s.current_mut().base_url = "http://10.0.0.5:8642/p/haiku/v1/".into();
+    assert_eq!(s.endpoint().unwrap().base_url, "http://10.0.0.5:8642/p/haiku/v1");
+}
+
+#[test]
+fn failed_run_is_an_error_not_text() {
+    let body = r#"{"choices":[{"index":0,"message":{"role":"assistant","content":"rate-limited, try later"},"finish_reason":"error"}],"hermes":{"failed":true,"error":"HTTP 429"}}"#;
+    let e = wire::parse(Protocol::OpenAi, body).err().unwrap();
+    assert!(e.contains("HTTP 429"), "{e}");
+    let ok = r#"{"choices":[{"index":0,"message":{"role":"assistant","content":"fine"},"finish_reason":"stop"}]}"#;
+    assert_eq!(wire::parse(Protocol::OpenAi, ok).unwrap().text, "fine");
+}
