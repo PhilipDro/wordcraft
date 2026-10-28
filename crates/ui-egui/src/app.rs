@@ -136,6 +136,7 @@ impl WordApp {
             autosave_path: None,
             saves_in_flight: Vec::new(),
             font_generation: wordcraft_fonts::FontDb::global().generation(),
+            assistant: crate::assistant::AssistantPane::default(),
             recovery_seen: false,
             no_document: None,
             comment_drafts: Default::default(),
@@ -364,6 +365,7 @@ impl WordApp {
         }
         zotero::poll(self, ctx);
         read_aloud::poll(self, ctx);
+        crate::assistant::poll(self, ctx);
         self.clear_stale_change_picture();
         let _ = self.poll_file_dialog();
         self.autosave_tick(now_ms());

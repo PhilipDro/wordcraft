@@ -15,6 +15,7 @@ macro_rules! tl {
 
 pub mod a11y;
 pub mod a11y_pane;
+pub mod assistant;
 pub mod async_saves;
 pub mod autoscroll;
 pub mod backstage;
@@ -599,6 +600,8 @@ pub struct WordApp {
     /// keystroke, so one visit's keystrokes make a single undo step (and anything else in
     /// between, such as an Undo, starts a new one).
     pub(crate) info_editing: Option<(&'static str, u64)>,
+    /// The Assistant pane and its agent (`ui.assistant`).
+    pub assistant: assistant::AssistantPane,
     recovery_seen: bool,
     /// Started on the Start screen with nothing to open (#1129): the id of the placeholder
     /// blank document the session holds until the user creates or opens one. While it is still

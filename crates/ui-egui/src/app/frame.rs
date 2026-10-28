@@ -60,6 +60,7 @@ impl WordApp {
                     return;
                 }
                 chrome::status_bar(self, ui);
+                crate::assistant::show(self, ui);
                 panes::show(self, ui);
             }
             if moved(self) {

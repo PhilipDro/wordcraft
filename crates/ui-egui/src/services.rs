@@ -92,6 +92,10 @@ pub struct Services {
     /// used while File › Options names none. File › New lists personal templates from it and Save
     /// as Word Template starts in it. `None` (web) hides personal templates.
     pub templates_dir: Option<std::path::PathBuf>,
+    /// The assistant's HTTP client. Desktop: sends the request on a background thread, delivers
+    /// the response body (or an error) through the returned channel and wakes the UI. `None` (the
+    /// web, for now): the Assistant pane says the assistant isn't available here.
+    pub http: Option<Box<wordcraft_assistant::Http>>,
 }
 
 /// Files delivered asynchronously.

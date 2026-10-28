@@ -731,6 +731,7 @@ impl WordApp {
                         .into(),
                 ));
             }
+            "ui.assistant" => return Some(crate::assistant::command(self, p)),
             "ui.discord" => {
                 self.canvas.open_url = Some("https://discord.gg/artcraft".into());
                 json!({})

@@ -12,7 +12,8 @@ impl WordApp {
     /// preferences.
     pub fn prefs(&self) -> UiState {
         let mut ui = self.ui.clone();
-        ui.author = self.session.author.clone();
+        // While the assistant edits, the session's author is "AI (model)": save the user's name.
+        ui.author = self.assistant.agent.user_author().unwrap_or(&self.session.author).to_string();
         ui.initials = self.session.initials.clone();
         ui.dictionary = wordcraft_engine::proof::user_dictionary();
         ui.editing = self.session.prefs.clone();

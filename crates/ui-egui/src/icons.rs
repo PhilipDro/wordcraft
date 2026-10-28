@@ -297,6 +297,12 @@ fn paint_clipboard_to_insert(pen: &Pen, name: &str) -> bool {
             pen.line(&[(5.0, 9.5), (5.0, 11.0), (10.0, 15.0), (15.0, 11.0), (15.0, 9.5)]);
             pen.line(&[(10.0, 15.0), (10.0, 18.0)]);
         }
+        // A speech bubble with a four-point sparkle (original artwork).
+        "assistant" => {
+            pen.closed(&[(3.0, 4.0), (17.0, 4.0), (17.0, 14.0), (9.0, 14.0), (5.5, 17.5), (5.5, 14.0), (3.0, 14.0)], c);
+            pen.fill(&[(10.0, 5.3), (11.0, 9.0), (10.0, 12.7), (9.0, 9.0)], a);
+            pen.fill(&[(6.3, 9.0), (10.0, 8.0), (13.7, 9.0), (10.0, 10.0)], a);
+        }
         "editor" | "spelling" => {
             pen.text(8.0, 7.0, 9.0, "abc", c, true);
             pen.line_c(&[(5.0, 13.0), (8.5, 16.5), (16.0, 9.0)], green);

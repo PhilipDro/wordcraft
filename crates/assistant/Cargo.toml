@@ -1,0 +1,18 @@
+[package]
+name = "wordcraft-assistant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WordCraft's in-app AI assistant: provider presets, the two wire formats, and the agent loop over the command registry"
+
+[lints]
+workspace = true
+
+[dependencies]
+wordcraft-engine = { workspace = true }
+wordcraft-mcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+wordcraft-doc = { workspace = true }

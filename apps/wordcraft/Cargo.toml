@@ -17,6 +17,11 @@ wordcraft-proof = { workspace = true }
 # Fonts the user added (#582) load from the settings folder at start-up.
 wordcraft-fonts = { workspace = true }
 wordcraft-ui-egui = { workspace = true }
+# The in-app assistant's settings (`assistant.json`) and the HTTP request/error types.
+wordcraft-assistant = { workspace = true }
+# The assistant's HTTPS calls to the model provider (`assistant_http`), each on its own thread. rustls with the ring
+# provider; no gzip.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 # The control key file's location (shared with the MCP bridge).
 wordcraft-control-key = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "clipboard", "wayland", "x11", "links"] }

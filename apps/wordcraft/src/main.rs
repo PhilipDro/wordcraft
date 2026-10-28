@@ -12,6 +12,7 @@
 mod animations;
 #[cfg(target_os = "macos")]
 mod apple_events;
+mod assistant_http;
 mod clipboard;
 mod control_server;
 mod default_apps;
@@ -53,6 +54,10 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         apple_events::poll(&self.5, &mut self.0, ctx);
         self.0.logic(ctx);
+        if self.0.assistant.settings_changed {
+            self.0.assistant.settings_changed = false;
+            save_assistant_settings(&self.0);
+        }
         self.3.show(frame);
         let window = self.4;
         // A window that doesn't fit on its screen (the default size on a laptop) shrinks to fit
@@ -120,6 +125,7 @@ impl eframe::App for App {
         print::finish_pending_jobs();
         self.0.session.finish_recovery();
         save_prefs(&self.0);
+        save_assistant_settings(&self.0);
         if let Some(key_file) = &self.2 {
             key_file.remove();
         }
@@ -259,12 +265,63 @@ fn write_prefs(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
+/// `assistant.json` next to the preferences: provider, API keys, models, and the
+/// prompt-on-selection settings. Not in `ui.json`, which is shared with the MCP bridge and easy to
+/// attach to a bug report.
+fn assistant_settings_path() -> Option<std::path::PathBuf> {
+    Some(prefs_path()?.parent()?.join("assistant.json"))
+}
+
+fn load_assistant_settings(app: &mut WordApp) {
+    if !prefs_enabled() {
+        return;
+    }
+    if let Some(p) = assistant_settings_path()
+        && let Some(s) = read_settings(&p)
+    {
+        app.assistant.settings = s;
+    }
+}
+
+fn save_assistant_settings(app: &WordApp) {
+    if prefs_enabled()
+        && let Some(p) = assistant_settings_path()
+    {
+        write_settings(&p, &app.assistant.settings);
+    }
+}
+
+fn read_settings(p: &std::path::Path) -> Option<wordcraft_assistant::Settings> {
+    serde_json::from_slice(&std::fs::read(p).ok()?).ok()
+}
+
+/// Best effort, like the preferences. Owner-only on Unix (it holds API keys); on Windows the
+/// per-user AppData folder is private enough. Never logs the contents.
+fn write_settings(p: &std::path::Path, s: &wordcraft_assistant::Settings) {
+    use std::io::Write;
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let Ok(bytes) = serde_json::to_vec_pretty(s) else { return };
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    if let Ok(mut f) = o.open(p) {
+        let _ = f.write_all(&bytes);
+    }
+}
+
 /// Native file dialogs, shown without blocking the window (`file_dialogs`, #94), File › Print
 /// through the system spooler (`print`), the system clipboard's text, formatted copies,
 /// pictures and format names (`clipboard`, #45, #584, #687, #833), the system's animation setting
 /// (`animations`), and making WordCraft the default app for Word documents (`default_apps`, #295).
 fn services(file_dialog: file_dialogs::Hook, ctx: &egui::Context) -> Services {
     Services {
+        http: Some(assistant_http::hook(ctx)),
         file_dialog: Some(file_dialog),
         printers: Some(print::discover()),
         print_native: Some(print::submit()),
@@ -465,6 +522,7 @@ fn main() -> eframe::Result {
             let mut app = WordApp::new(session, services(file_dialog, &cc.egui_ctx));
             app.set_startup_update_check(true);
             load_prefs(&mut app);
+            load_assistant_settings(&mut app);
             load_user_dictionary(&mut app);
             // A region chosen in File › Options replaces the system's for the first blank
             // document too (#838).
@@ -606,6 +664,26 @@ mod prefs_tests {
         std::fs::create_dir(dir.join(format!(".ui.json.{}.tmp", std::process::id()))).unwrap();
         assert!(write_prefs(&path, b"newer").is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod assistant_settings_tests {
+    #[test]
+    fn settings_round_trip() {
+        let dir = std::env::temp_dir().join(format!("wordcraft-as-{}", std::process::id()));
+        let p = dir.join("sub").join("assistant.json");
+        let mut s = wordcraft_assistant::Settings::default();
+        super::write_settings(&p, &s);
+        assert!(super::read_settings(&p).is_some());
+        s = super::read_settings(&p).unwrap_or_default();
+        assert_eq!(serde_json::to_value(&s).ok(), serde_json::to_value(wordcraft_assistant::Settings::default()).ok());
+        assert!(super::read_settings(&dir.join("missing.json")).is_none());
+        // An old file without the rewrite section still loads, with the defaults.
+        std::fs::write(&p, br#"{"provider":"claude","providers":{}}"#).ok();
+        let old = super::read_settings(&p).unwrap_or_default();
+        assert_eq!(old.provider, "claude");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
