@@ -11,7 +11,7 @@ pub fn specs() -> Vec<CommandSpec> {
         CommandSpec::new("ai.rewriteSelection", "Rewrite with AI", "Home › Assistant", run)
             .key("Mod+Shift+I")
             .params(
-                r#"{"prompt"?: string (a preset name such as "Kürzen", or an instruction; omitted, the app opens its popover), "scope"?: "whole"|"section"|"paragraphs"|"selectionOnly"} → {applied, chars, ms, model}"#,
+                r#"{"prompt"?: string (a preset name such as "Shorten", or an instruction; omitted, the app opens its popover), "scope"?: "whole"|"section"|"paragraphs"|"selectionOnly"} → {applied, chars, ms, model}"#,
             )
             .when(needs_selection),
     ]

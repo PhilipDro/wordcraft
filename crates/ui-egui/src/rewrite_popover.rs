@@ -3,7 +3,9 @@
 //! over the selection as a tracked change by "AI (model)", one undo step
 //! ([`wordcraft_assistant::rewrite::apply`]). If the document or the selection changed while the
 //! model was working, the popover asks before applying. Settings live with the assistant's
-//! (`assistant.json`); their editor is [`settings_ui`].
+//! (`assistant.json`); their editor is [`settings_ui`]. With the Hermes provider, a profile
+//! picker beside Send chooses which Hermes profile runs the request and keeps it as the Hermes
+//! model setting; other providers show their model, read-only.
 
 use egui::{Align, Layout, Order, Pos2, RichText, Ui, vec2};
 use serde_json::{Value, json};
@@ -49,6 +51,9 @@ pub fn command(app: &mut WordApp, p: &Value) -> Result<Value, String> {
         Some(s) => Some(Scope::parse(s).ok_or("`scope` must be whole, section, paragraphs or selectionOnly")?),
         None => None,
     };
+    if let Some(profile) = p.get("profile").and_then(Value::as_str) {
+        pick_profile(app, profile)?;
+    }
     match p.get("prompt").and_then(Value::as_str) {
         Some(prompt) => headless(app, prompt, scope),
         None => {
@@ -56,6 +61,21 @@ pub fn command(app: &mut WordApp, p: &Value) -> Result<Value, String> {
             Ok(json!({"open": true}))
         }
     }
+}
+
+/// The popover's profile picker: run Hermes requests on `profile` from now on and save it as the
+/// Hermes model setting. An error when Hermes isn't the provider.
+fn pick_profile(app: &mut WordApp, profile: &str) -> Result<(), String> {
+    if app.assistant.settings.hermes_profiles().is_none() {
+        return Err("`profile` needs the Hermes provider (Assistant settings).".into());
+    }
+    if profile.trim().is_empty() {
+        return Err("`profile` is empty.".into());
+    }
+    if app.assistant.settings.set_hermes_profile(profile) {
+        app.assistant.settings_changed = true;
+    }
+    Ok(())
 }
 
 fn open(app: &mut WordApp, scope: Option<Scope>) {
@@ -87,7 +107,7 @@ fn headless(app: &mut WordApp, prompt: &str, scope: Option<Scope>) -> Result<Val
     let text = match job.wait(std::time::Duration::from_secs(HEADLESS_WAIT_S)) {
         Outcome::Answer(t) => t,
         Outcome::Failed(e) => return Err(e),
-        Outcome::Waiting => return Err("Modell nicht erreichbar: keine Antwort.".into()),
+        Outcome::Waiting => return Err("Model unreachable: no answer.".into()),
     };
     let ms = (crate::clock::now_ms() - t0).round() as u64;
     if !job.snapshot.holds(&app.session) {
@@ -104,7 +124,7 @@ fn send(app: &mut WordApp) {
         return;
     }
     let Some(http) = app.services.http.as_ref() else {
-        app.assistant.rewrite.error = Some("Der Assistent ist hier nicht verfügbar.".into());
+        app.assistant.rewrite.error = Some("The assistant isn't available here.".into());
         return;
     };
     let scope = r.scope.unwrap_or(app.assistant.settings.rewrite.scope);
@@ -173,6 +193,11 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context) {
             }
         }
         Some(Action::Discard) => app.assistant.rewrite.conflict = None,
+        Some(Action::Profile(p)) => {
+            if let Err(e) = pick_profile(app, &p) {
+                app.assistant.rewrite.error = Some(e);
+            }
+        }
         None => {}
     }
 }
@@ -183,26 +208,29 @@ enum Action {
     Close,
     ApplyAnyway,
     Discard,
+    /// A Hermes profile chosen in the picker.
+    Profile(String),
 }
 
 fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
     let mut action = None;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Mit KI bearbeiten").font(semibold(13.5)));
+        ui.label(RichText::new("Rewrite with AI").font(semibold(13.5)));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if crate::widgets::icon_button(ui, "close", "Schließen").clicked() {
+            if crate::widgets::icon_button(ui, "close", "Close").clicked() {
                 action = Some(Action::Close);
             }
         });
     });
     let model = app.assistant.settings.endpoint().map(|e| e.model).unwrap_or_default();
+    let profiles = app.assistant.settings.hermes_profiles();
     let r = &mut app.assistant.rewrite;
     if let Some(job) = r.job.as_ref() {
         let secs = ((crate::clock::now_ms() - job.started_ms) / 1000.0).max(0.0);
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(format!("{model} arbeitet … {secs:.0} s"));
-            if ui.button("Stopp").clicked() {
+            ui.label(format!("{model} is working … {secs:.0} s"));
+            if ui.button("Stop").clicked() {
                 action = Some(Action::Stop);
             }
         });
@@ -210,12 +238,12 @@ fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
         return action;
     }
     if r.conflict.is_some() {
-        ui.label(RichText::new("Auswahl geändert").color(t.red));
+        ui.label(RichText::new("Selection changed").color(t.red));
         ui.horizontal(|ui| {
-            if ui.button("Trotzdem anwenden").clicked() {
+            if ui.button("Apply anyway").clicked() {
                 action = Some(Action::ApplyAnyway);
             }
-            if ui.button("Verwerfen").clicked() {
+            if ui.button("Discard").clicked() {
                 action = Some(Action::Discard);
             }
         });
@@ -223,7 +251,7 @@ fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
     }
     let settings = &app.assistant.settings.rewrite;
     ui.horizontal(|ui| {
-        craft_ui::ComboBox::from_id_salt("wc_rewrite_preset").selected_text("Vorlage").width(150.0).show_ui(ui, |ui| {
+        craft_ui::ComboBox::from_id_salt("wc_rewrite_preset").selected_text("Preset").width(150.0).show_ui(ui, |ui| {
             for p in &settings.presets {
                 if ui.selectable_label(false, &p.name).on_hover_text(&p.prompt).clicked() {
                     r.prompt = p.prompt.clone();
@@ -240,16 +268,34 @@ fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
             }
         });
     });
-    let edit = ui.add(egui::TextEdit::singleline(&mut r.prompt).hint_text("Anweisung, z. B. „Kürzen“ — Enter sendet").desired_width(f32::INFINITY));
+    let edit = ui.add(
+        egui::TextEdit::singleline(&mut r.prompt)
+            .hint_text("Instruction, e.g. \u{201c}Shorten\u{201d} \u{2014} Enter sends")
+            .desired_width(f32::INFINITY),
+    );
     if std::mem::take(&mut r.focus) {
         edit.request_focus();
     }
     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     ui.horizontal(|ui| {
-        if ui.add_enabled(!r.prompt.trim().is_empty(), egui::Button::new("Senden")).clicked() || enter {
+        if ui.add_enabled(!r.prompt.trim().is_empty(), egui::Button::new("Send")).clicked() || enter {
             action = Some(Action::Send);
         }
-        ui.label(RichText::new(model).font(regular(11.0)).color(t.text_dim));
+        match &profiles {
+            Some((list, current)) => {
+                ui.label(RichText::new("Profile").font(regular(11.0)).color(t.text_dim));
+                craft_ui::ComboBox::from_id_salt("wc_rewrite_profile").selected_text(current.as_str()).width(130.0).show_ui(ui, |ui| {
+                    for p in list {
+                        if ui.selectable_label(p == current, p.as_str()).clicked() && p != current {
+                            action = Some(Action::Profile(p.clone()));
+                        }
+                    }
+                });
+            }
+            None => {
+                ui.label(RichText::new(model).font(regular(11.0)).color(t.text_dim));
+            }
+        }
     });
     if let Some(e) = &r.error {
         ui.add(egui::Label::new(RichText::new(e).color(t.red)).wrap());
@@ -257,12 +303,12 @@ fn body(app: &mut WordApp, ui: &mut Ui, t: &Tokens) -> Option<Action> {
     action
 }
 
-/// The "Mit KI bearbeiten" settings, under the assistant's provider settings (same endpoint).
+/// The "Rewrite with AI" settings, under the assistant's provider settings (same endpoint).
 pub fn settings_ui(pane: &mut AssistantPane, ui: &mut Ui) {
     let mut changed = false;
-    egui::CollapsingHeader::new(RichText::new("Mit KI bearbeiten").font(semibold(12.5))).id_salt("rewrite_settings").show(ui, |ui| {
+    egui::CollapsingHeader::new(RichText::new("Rewrite with AI").font(semibold(12.5))).id_salt("rewrite_settings").show(ui, |ui| {
         let s = &mut pane.settings.rewrite;
-        ui.label("Kontext");
+        ui.label("Context");
         craft_ui::ComboBox::from_id_salt("rewrite_scope_setting").selected_text(s.scope.label()).width(ui.available_width()).show_ui(ui, |ui| {
             for x in Scope::ALL {
                 if ui.selectable_label(x == s.scope, x.label()).clicked() && x != s.scope {
@@ -272,27 +318,27 @@ pub fn settings_ui(pane: &mut AssistantPane, ui: &mut Ui) {
             }
         });
         ui.horizontal(|ui| {
-            ui.label("Absätze ringsum");
+            ui.label("Paragraphs around");
             changed |= ui.add(egui::DragValue::new(&mut s.scope_paragraphs).range(0..=50)).changed();
         });
         ui.horizontal(|ui| {
-            ui.label("Höchstens Zeichen Kontext");
+            ui.label("Max. context characters");
             changed |= ui.add(egui::DragValue::new(&mut s.max_context_chars).range(500..=1_000_000).speed(100)).changed();
         });
-        ui.label("Systemprompt");
+        ui.label("System prompt");
         changed |= ui.add(egui::TextEdit::multiline(&mut s.system_prompt).desired_rows(4).desired_width(f32::INFINITY)).changed();
-        if ui.small_button("Standard wiederherstellen").clicked() {
+        if ui.small_button("Restore default").clicked() {
             s.system_prompt = rewrite::DEFAULT_SYSTEM_PROMPT.into();
             changed = true;
         }
-        ui.label("Vorlagen");
+        ui.label("Presets");
         let mut remove = None;
         for (i, p) in s.presets.iter_mut().enumerate() {
             ui.horizontal(|ui| {
                 changed |= ui.add(egui::TextEdit::singleline(&mut p.name).desired_width(110.0)).changed();
                 let w = (ui.available_width() - 28.0).max(60.0);
                 changed |= ui.add(egui::TextEdit::singleline(&mut p.prompt).desired_width(w)).changed();
-                if ui.small_button("−").on_hover_text("Vorlage entfernen").clicked() {
+                if ui.small_button("−").on_hover_text("Remove preset").clicked() {
                     remove = Some(i);
                 }
             });
@@ -301,8 +347,8 @@ pub fn settings_ui(pane: &mut AssistantPane, ui: &mut Ui) {
             s.presets.remove(i);
             changed = true;
         }
-        if ui.small_button("+ Vorlage").clicked() {
-            s.presets.push(RewritePreset { name: "Neu".into(), prompt: String::new() });
+        if ui.small_button("+ Preset").clicked() {
+            s.presets.push(RewritePreset { name: "New".into(), prompt: String::new() });
             changed = true;
         }
     });
@@ -332,7 +378,10 @@ mod tests {
             rx
         };
         let services = Services { http: Some(Box::new(http)), ..Default::default() };
-        let mut app = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Kopf\nDer Absatz ist viel zu lang und umständlich.")), services);
+        let mut app = WordApp::new(
+            wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Kopf\nDer Absatz ist viel zu lang und umständlich.")),
+            services,
+        );
         app.assistant.settings.provider = CUSTOM.into();
         app.assistant
             .settings
@@ -377,7 +426,7 @@ mod tests {
         let (mut a, sent) = app_with(Ok("„Der Absatz ist kurz.“"));
         select_second(&mut a);
         let depth = a.session.undo_depth();
-        let r = a.run("ai.rewriteSelection", json!({"prompt": "Kürzen", "scope": "section"})).unwrap();
+        let r = a.run("ai.rewriteSelection", json!({"prompt": "Shorten", "scope": "section"})).unwrap();
         assert_eq!((r["applied"].clone(), r["model"].clone(), r["scope"].clone()), (json!(true), json!("qwen"), json!("section")), "{r}");
         assert_eq!(final_text(&a), "Kopf\nDer Absatz ist kurz.");
         assert_eq!(a.session.undo_depth(), depth + 1);
@@ -385,7 +434,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_str(&sent.borrow()[0]).unwrap();
         let user = body["messages"][1]["content"].as_str().unwrap();
         assert!(user.contains("<selection>\nDer Absatz ist viel zu lang und umständlich.\n</selection>"), "{user}");
-        assert!(user.ends_with("Kürze den Text deutlich, ohne wesentliche Information zu verlieren."), "the preset's prompt: {user}");
+        assert!(user.ends_with("Shorten the text considerably without losing essential information."), "the preset's prompt: {user}");
         assert!(body.get("tools").is_none());
         let changes = a.session.run("review.changes", &json!({})).unwrap().to_string();
         assert!(changes.contains("AI (qwen)") && !changes.contains("Philip"), "{changes}");
@@ -397,8 +446,8 @@ mod tests {
     fn an_unreachable_model_is_an_error_not_a_hang() {
         let (mut a, _) = app_with(Err("network error: connection failed"));
         select_second(&mut a);
-        let e = a.run("ai.rewriteSelection", json!({"prompt": "Kürzen"})).unwrap_err();
-        assert!(e.starts_with("Modell nicht erreichbar"), "{e}");
+        let e = a.run("ai.rewriteSelection", json!({"prompt": "Shorten"})).unwrap_err();
+        assert!(e.starts_with("Model unreachable"), "{e}");
         assert_eq!(final_text(&a), "Kopf\nDer Absatz ist viel zu lang und umständlich.");
         assert!(a.run("ai.rewriteSelection", json!({"prompt": "x", "scope": "nope"})).is_err());
     }
@@ -410,7 +459,7 @@ mod tests {
         a.run("ai.rewriteSelection", json!({})).unwrap();
         assert!(a.assistant.rewrite.open);
         frames(&mut a, 2);
-        a.assistant.rewrite.prompt = "Kürzen".into();
+        a.assistant.rewrite.prompt = "Shorten".into();
         super::send(&mut a);
         frames(&mut a, 2);
         assert!(!a.assistant.rewrite.open, "closed after applying: {:?}", a.assistant.rewrite.error);
@@ -418,11 +467,53 @@ mod tests {
     }
 
     #[test]
+    fn the_hermes_profile_picker_routes_the_request_and_is_remembered() {
+        let (mut a, sent) = app_with(Ok("Kurz."));
+        a.assistant.settings.provider = wordcraft_assistant::providers::HERMES.into();
+        a.assistant.settings.providers.insert(
+            wordcraft_assistant::providers::HERMES.into(),
+            ProviderSettings { api_key: "k".repeat(20), model: "sonnet".into(), ..Default::default() },
+        );
+        let (list, current) = a.assistant.settings.hermes_profiles().unwrap();
+        assert_eq!(current, "sonnet");
+        assert!(list.iter().any(|p| p == "haiku") && list.iter().any(|p| p == "default"), "{list:?}");
+        select_second(&mut a);
+        a.run("ai.rewriteSelection", json!({})).unwrap();
+        frames(&mut a, 2);
+        assert!(!a.assistant.settings_changed);
+        super::pick_profile(&mut a, "haiku").unwrap();
+        assert!(a.assistant.settings_changed, "the pick is saved");
+        assert_eq!(a.assistant.settings.providers[wordcraft_assistant::providers::HERMES].model, "haiku");
+        assert_eq!(a.assistant.settings.endpoint().unwrap().base_url, "http://127.0.0.1:8642/p/haiku/v1");
+        a.assistant.rewrite.prompt = "Shorten".into();
+        super::send(&mut a);
+        frames(&mut a, 2);
+        assert_eq!(final_text(&a), "Kopf\nKurz.");
+        let changes = a.session.run("review.changes", &json!({})).unwrap().to_string();
+        assert!(changes.contains("AI (haiku)"), "{changes}");
+        assert_eq!(sent.borrow().len(), 1);
+        // Headless, the same picker path through the command's `profile`.
+        let r = a.run("ai.rewriteSelection", json!({"profile": "golem"})).unwrap();
+        assert_eq!(r["open"], true);
+        assert_eq!(a.assistant.settings.providers[wordcraft_assistant::providers::HERMES].model, "golem");
+    }
+
+    #[test]
+    fn the_profile_picker_is_hermes_only() {
+        let (mut a, _) = app_with(Ok("Kurz."));
+        assert!(a.assistant.settings.hermes_profiles().is_none());
+        assert!(super::pick_profile(&mut a, "haiku").is_err());
+        assert!(a.run("ai.rewriteSelection", json!({"profile": "haiku", "prompt": "x"})).is_err());
+        assert_eq!(a.assistant.settings.provider, wordcraft_assistant::providers::CUSTOM);
+        assert!(!a.assistant.settings_changed);
+    }
+
+    #[test]
     fn a_changed_selection_asks_before_applying() {
         let (mut a, _) = app_with(Ok("Kurz."));
         select_second(&mut a);
         a.run("ai.rewriteSelection", json!({})).unwrap();
-        a.assistant.rewrite.prompt = "Kürzen".into();
+        a.assistant.rewrite.prompt = "Shorten".into();
         super::send(&mut a);
         a.session.run("caret.docStart", &json!({})).unwrap();
         frames(&mut a, 2);

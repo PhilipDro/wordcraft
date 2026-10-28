@@ -32,6 +32,10 @@ pub const CUSTOM: &str = "custom";
 /// Claude-subscription profiles (golem, sonnet, haiku, …) work without an Anthropic API key.
 pub const HERMES: &str = "hermes";
 
+/// The Hermes profiles the gateway serves (the prompt popover's picker offers these, plus
+/// whatever profile is configured).
+pub const HERMES_PROFILES: &[&str] = &["default", "golem", "golem-next", "caladog", "calalite", "sonnet", "haiku"];
+
 pub const PRESETS: &[Preset] = &[
     Preset { id: "claude", name: "Claude", protocol: Protocol::Anthropic, base_url: "https://api.anthropic.com/v1", model: "claude-sonnet-5-5" },
     Preset {
@@ -112,6 +116,33 @@ impl Settings {
         self.providers.entry(id).or_default()
     }
 
+    /// With Hermes chosen: the profiles to pick from (known ones, then the configured one if it
+    /// is another) and the one in use. `None` for every other provider.
+    pub fn hermes_profiles(&self) -> Option<(Vec<String>, String)> {
+        if self.provider_id() != HERMES {
+            return None;
+        }
+        let current = self.providers.get(HERMES).map(|p| p.model.trim().to_string()).filter(|m| !m.is_empty());
+        let current = current.unwrap_or_else(|| preset(HERMES).map_or("default", |p| p.model).to_string());
+        let mut list: Vec<String> = HERMES_PROFILES.iter().map(|s| s.to_string()).collect();
+        if !list.contains(&current) {
+            list.push(current.clone());
+        }
+        Some((list, current))
+    }
+
+    /// Run Hermes requests on `profile` from now on (the Hermes model setting). Returns whether
+    /// anything changed; the host saves the settings then.
+    pub fn set_hermes_profile(&mut self, profile: &str) -> bool {
+        let profile = profile.trim();
+        let entry = self.providers.entry(HERMES.to_string()).or_default();
+        if profile.is_empty() || entry.model == profile {
+            return false;
+        }
+        entry.model = profile.to_string();
+        true
+    }
+
     /// The endpoint to call, or why the settings aren't usable yet.
     pub fn endpoint(&self) -> Result<Endpoint, String> {
         let ep = self.connection()?;
@@ -160,11 +191,7 @@ fn hermes_base(base: &str, profile: &str) -> String {
         return base.to_string();
     }
     let profile = profile.trim();
-    if profile.is_empty() || profile == "default" || profile == "hermes-agent" {
-        format!("{base}/v1")
-    } else {
-        format!("{base}/p/{profile}/v1")
-    }
+    if profile.is_empty() || profile == "default" || profile == "hermes-agent" { format!("{base}/v1") } else { format!("{base}/p/{profile}/v1") }
 }
 
 /// The gateway key kept outside `assistant.json` (so a settings rewrite never drops it):

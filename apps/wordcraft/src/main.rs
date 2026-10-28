@@ -281,6 +281,8 @@ fn load_assistant_settings(app: &mut WordApp) {
         && let Some(s) = read_settings(&p)
     {
         app.assistant.settings = s;
+        // German defaults saved by an earlier build become the English ones (edits are kept).
+        app.assistant.settings_changed |= app.assistant.settings.rewrite.upgrade_old_defaults();
     }
 }
 

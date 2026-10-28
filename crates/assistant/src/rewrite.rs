@@ -47,13 +47,13 @@ impl Scope {
         Scope::ALL.into_iter().find(|x| x.id().eq_ignore_ascii_case(s))
     }
 
-    /// The German label the settings and the popover show.
+    /// The label the settings and the popover show.
     pub fn label(self) -> &'static str {
         match self {
-            Scope::Whole => "Ganzes Dokument",
-            Scope::Section => "Abschnitt",
-            Scope::Paragraphs => "Absätze ringsum",
-            Scope::SelectionOnly => "Nur Auswahl",
+            Scope::Whole => "Whole document",
+            Scope::Section => "Section",
+            Scope::Paragraphs => "Nearby paragraphs",
+            Scope::SelectionOnly => "Selection only",
         }
     }
 }
@@ -65,12 +65,27 @@ pub struct RewritePreset {
     pub prompt: String,
 }
 
-pub const DEFAULT_SYSTEM_PROMPT: &str = "Du bist ein Lektoratswerkzeug in einem Textverarbeitungsprogramm. \
+pub const DEFAULT_SYSTEM_PROMPT: &str = "You are an editing tool inside a word processor. \
+You get part of the document as context (<document>), the selected text (<selection>) and an instruction. \
+Apply the instruction to the selection only and return NOTHING but the replacement text for the selection: \
+no introduction, no explanation, no quotation marks, no Markdown, no code blocks. \
+Keep the language of the selection unless the instruction explicitly asks for another one. \
+Separate paragraphs with a line break. The context is only there for understanding: never repeat it.";
+
+/// The German defaults of earlier builds. Settings that still hold them unchanged are moved to
+/// the English defaults on load ([`RewriteSettings::upgrade_old_defaults`]); edited ones are kept.
+const OLD_SYSTEM_PROMPT_DE: &str = "Du bist ein Lektoratswerkzeug in einem Textverarbeitungsprogramm. \
 Du bekommst einen Ausschnitt des Dokuments als Kontext (<document>), die markierte Auswahl (<selection>) und eine Anweisung. \
 Wende die Anweisung nur auf die Auswahl an und gib AUSSCHLIESSLICH den Ersatztext für die Auswahl zurück: \
 keine Einleitung, keine Erklärung, keine Anführungszeichen, kein Markdown, keine Codeblöcke. \
 Behalte die Sprache der Auswahl bei, außer die Anweisung verlangt ausdrücklich eine andere. \
 Trenne Absätze mit einem Zeilenumbruch. Der Kontext dient nur dem Verständnis: gib ihn nie wieder.";
+const OLD_PRESETS_DE: [(&str, &str); 4] = [
+    ("Schärfen", "Schärfe den Text: präziser, klarer und aktiver formuliert, ohne den Inhalt zu ändern."),
+    ("Kürzen", "Kürze den Text deutlich, ohne wesentliche Information zu verlieren."),
+    ("Formeller", "Formuliere den Text formeller und professioneller, bei gleichem Inhalt."),
+    ("Englisch → Deutsch", "Übersetze den Text ins Deutsche. Gib nur die Übersetzung zurück."),
+];
 
 /// The prompt-on-selection settings, stored in `assistant.json` beside the provider settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -92,17 +107,34 @@ impl Default for RewriteSettings {
             max_context_chars: 60_000,
             system_prompt: DEFAULT_SYSTEM_PROMPT.into(),
             presets: vec![
-                p("Schärfen", "Schärfe den Text: präziser, klarer und aktiver formuliert, ohne den Inhalt zu ändern."),
-                p("Kürzen", "Kürze den Text deutlich, ohne wesentliche Information zu verlieren."),
-                p("Formeller", "Formuliere den Text formeller und professioneller, bei gleichem Inhalt."),
-                p("Englisch → Deutsch", "Übersetze den Text ins Deutsche. Gib nur die Übersetzung zurück."),
+                p("Sharpen", "Sharpen the text: more precise, clearer and more active, without changing what it says."),
+                p("Shorten", "Shorten the text considerably without losing essential information."),
+                p("More formal", "Rewrite the text in a more formal, professional tone; same content."),
+                p("English → German", "Translate the text into German. Return only the translation."),
             ],
         }
     }
 }
 
 impl RewriteSettings {
-    /// A preset's name stands for its prompt (`"Kürzen"` → the Kürzen preset's text); anything
+    /// Settings saved by an earlier build with the German defaults untouched get the English
+    /// defaults; anything the user edited stays. Returns whether something changed.
+    pub fn upgrade_old_defaults(&mut self) -> bool {
+        let mut changed = false;
+        if self.system_prompt == OLD_SYSTEM_PROMPT_DE {
+            self.system_prompt = DEFAULT_SYSTEM_PROMPT.into();
+            changed = true;
+        }
+        let old =
+            self.presets.len() == OLD_PRESETS_DE.len() && self.presets.iter().zip(OLD_PRESETS_DE).all(|(p, (n, t))| p.name == n && p.prompt == t);
+        if old {
+            self.presets = RewriteSettings::default().presets;
+            changed = true;
+        }
+        changed
+    }
+
+    /// A preset's name stands for its prompt (`"Shorten"` → the Shorten preset's text); anything
     /// else is the prompt itself.
     pub fn resolve_prompt(&self, prompt: &str) -> String {
         let p = prompt.trim();
@@ -313,27 +345,19 @@ pub fn start(settings: &Settings, scope: Scope, prompt: &str, session: &Session,
     let rs = &settings.rewrite;
     let prompt = rs.resolve_prompt(prompt);
     if prompt.is_empty() {
-        return Err("Keine Anweisung.".into());
+        return Err("No instruction.".into());
     }
     if session.sel.is_collapsed() {
-        return Err("Nichts ausgewählt.".into());
+        return Err("Nothing selected.".into());
     }
     let selection = session.selected_text();
     if selection.trim().is_empty() {
-        return Err("Die Auswahl enthält keinen Text.".into());
+        return Err("The selection contains no text.".into());
     }
     let context = scope_context(session, scope, rs.scope_paragraphs, rs.max_context_chars);
     let user = user_message(scope, &context, selection.trim_end_matches('\n'), &prompt);
     let (req, model, protocol) = build_request(settings, rs.system(), &user)?;
-    Ok(Job {
-        rx: http(req),
-        model,
-        protocol,
-        snapshot: Snapshot::of(session),
-        ends_paragraph: selection.ends_with('\n'),
-        started_ms: now_ms,
-        scope,
-    })
+    Ok(Job { rx: http(req), model, protocol, snapshot: Snapshot::of(session), ends_paragraph: selection.ends_with('\n'), started_ms: now_ms, scope })
 }
 
 /// The context text for `scope` around the session's selection (body only; elsewhere, none).
@@ -355,14 +379,14 @@ impl Job {
             Ok(reply) => {
                 let mut text = clean_answer(&reply.text);
                 if text.is_empty() {
-                    return Outcome::Failed("Das Modell hat keinen Text geliefert.".into());
+                    return Outcome::Failed("The model returned no text.".into());
                 }
                 if self.ends_paragraph && !text.ends_with('\n') {
                     text.push('\n');
                 }
                 Outcome::Answer(text)
             }
-            Err(e) => Outcome::Failed(format!("Modell nicht erreichbar: {e}")),
+            Err(e) => Outcome::Failed(format!("Model unreachable: {e}")),
         }
     }
 
@@ -370,7 +394,7 @@ impl Job {
         match self.rx.try_recv() {
             Ok(got) => self.take(got),
             Err(TryRecvError::Empty) => Outcome::Waiting,
-            Err(TryRecvError::Disconnected) => Outcome::Failed("Modell nicht erreichbar: die Anfrage brach ab.".into()),
+            Err(TryRecvError::Disconnected) => Outcome::Failed("Model unreachable: the request was dropped.".into()),
         }
     }
 
@@ -378,8 +402,8 @@ impl Job {
     pub fn wait(&self, timeout: std::time::Duration) -> Outcome {
         match self.rx.recv_timeout(timeout) {
             Ok(got) => self.take(got),
-            Err(RecvTimeoutError::Timeout) => Outcome::Failed("Modell nicht erreichbar: Zeitüberschreitung.".into()),
-            Err(RecvTimeoutError::Disconnected) => Outcome::Failed("Modell nicht erreichbar: die Anfrage brach ab.".into()),
+            Err(RecvTimeoutError::Timeout) => Outcome::Failed("Model unreachable: timed out.".into()),
+            Err(RecvTimeoutError::Disconnected) => Outcome::Failed("Model unreachable: the request was dropped.".into()),
         }
     }
 }
@@ -409,7 +433,17 @@ mod tests {
 
     /// H1 | a b | H2 | c d e | H3 | f
     fn fixture() -> Vec<Para> {
-        vec![p("Eins", true), p("a", false), p("b", false), p("Zwei", true), p("c", false), p("d", false), p("e", false), p("Drei", true), p("f", false)]
+        vec![
+            p("Eins", true),
+            p("a", false),
+            p("b", false),
+            p("Zwei", true),
+            p("c", false),
+            p("d", false),
+            p("e", false),
+            p("Drei", true),
+            p("f", false),
+        ]
     }
 
     #[test]
@@ -487,10 +521,23 @@ mod tests {
     fn presets_resolve_by_name_and_old_settings_load() {
         let r = RewriteSettings::default();
         assert_eq!(r.presets.len(), 4);
-        assert!(r.resolve_prompt("kürzen").starts_with("Kürze"));
+        assert!(r.resolve_prompt("shorten").starts_with("Shorten the text"));
         assert_eq!(r.resolve_prompt("Mach es lustig"), "Mach es lustig");
         let s: Settings = serde_json::from_str(r#"{"provider":"claude"}"#).unwrap_or_default();
         assert_eq!(s.rewrite, RewriteSettings::default());
+        let mut old = RewriteSettings {
+            system_prompt: OLD_SYSTEM_PROMPT_DE.into(),
+            presets: OLD_PRESETS_DE.iter().map(|(n, t)| RewritePreset { name: (*n).into(), prompt: (*t).into() }).collect(),
+            ..RewriteSettings::default()
+        };
+        assert!(old.upgrade_old_defaults());
+        assert_eq!(old, RewriteSettings::default(), "untouched German defaults become the English ones");
+        let mut edited = RewriteSettings::default();
+        edited.presets[0].prompt = "Mach es lustig".into();
+        edited.system_prompt = "Eigener Prompt".into();
+        let before = edited.clone();
+        assert!(!edited.upgrade_old_defaults());
+        assert_eq!(edited, before, "edited settings stay");
         let s: Settings = serde_json::from_str(r#"{"rewrite":{"scope":"section","scopeParagraphs":5}}"#).unwrap_or_default();
         assert_eq!((s.rewrite.scope, s.rewrite.scope_paragraphs, s.rewrite.max_context_chars), (Scope::Section, 5, 60_000));
     }
@@ -582,7 +629,7 @@ mod tests {
             rx
         };
         let job = start(&strata(), Scope::Whole, "Kürzen", &s, &down, 0.0).unwrap();
-        assert!(matches!(job.wait(std::time::Duration::from_secs(1)), Outcome::Failed(e) if e.starts_with("Modell nicht erreichbar: network")));
+        assert!(matches!(job.wait(std::time::Duration::from_secs(1)), Outcome::Failed(e) if e.starts_with("Model unreachable: network")));
         let dropped = |_r: HttpRequest| std::sync::mpsc::channel().1;
         let job = start(&strata(), Scope::Whole, "Kürzen", &s, &dropped, 0.0).unwrap();
         assert!(matches!(job.poll(), Outcome::Failed(_)));
