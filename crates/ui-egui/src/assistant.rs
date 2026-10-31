@@ -731,11 +731,11 @@ mod tests {
         a.session.author = "Ana Writer".into();
         a.run("ui.assistant", json!({"ask": "Hello"})).unwrap();
         assert_ne!(a.session.author, "Ana Writer", "edits are by the AI while it runs");
-        assert_eq!(a.prefs().author, "Ana Writer");
+        assert_eq!(a.prefs().author.as_deref(), Some("Ana Writer"));
         frames(&mut a, 3);
         assert!(!a.assistant.agent.busy());
         assert_eq!(a.session.author, "Ana Writer");
-        assert_eq!(a.prefs().author, "Ana Writer");
+        assert_eq!(a.prefs().author.as_deref(), Some("Ana Writer"));
     }
 
     #[test]
